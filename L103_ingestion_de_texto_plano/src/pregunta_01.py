@@ -1,3 +1,7 @@
+import pandas as pd
+import re
+from pathlib import Path
+
 def pregunta_01():
     """
     El archivo `data/clusters_report.txt` es un reporte de clústeres de
@@ -25,5 +29,42 @@ def pregunta_01():
         1        2                         102                          15.4
         ...
     """
+    ruta = Path(__file__).resolve().parent.parent / "data" / "clusters_report.txt"
 
-    raise NotImplementedError
+    with open(ruta, "rt") as archivo:
+        lector = archivo.readlines()
+
+    datos = []
+    cluster = None
+
+    for linea in lector:
+        coincidencia = re.match(r"^\s*(\d+)\s+(\d+)\s+([\d,]+)\s*%\s+(.*)$",linea)
+
+        if coincidencia:
+            if cluster is not None:
+                datos.append(cluster)
+
+            cluster = {
+                "cluster": int(coincidencia.group(1)),
+                "cantidad_de_palabras_clave": int(coincidencia.group(2)),
+                "porcentaje_de_palabras_clave": float(
+                    coincidencia.group(3).replace(",", ".")
+                ),
+                "principales_palabras_clave": coincidencia.group(4).strip()
+            }
+
+        elif cluster is not None:
+            cluster["principales_palabras_clave"] += " " + linea.strip()
+
+    if cluster is not None:
+        datos.append(cluster)
+
+    for cluster in datos:
+        palabras = cluster["principales_palabras_clave"]
+        palabras = re.sub(r"\s+", " ", palabras).strip()
+        palabras = palabras.rstrip(".")
+        cluster["principales_palabras_clave"] = palabras
+
+    dataframe = pd.DataFrame(datos)
+
+    return dataframe
