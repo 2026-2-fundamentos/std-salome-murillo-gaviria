@@ -1,8 +1,38 @@
 import pandas as pd
+from pathlib import Path
 
+def calcular_resumen(df):
+    lines = len(df)
+    sales = df["Sales"].sum()
+    profit = df["Profit"].sum()
+
+    loss = df["Profit"] < 0
+
+    return {
+        "lines": lines,
+        "sales": sales,
+        "profit": profit,
+        "profit_margin": profit / sales,
+        "loss_lines": loss.sum(),
+        "loss_line_rate": loss.sum() / lines,
+        "lost_profit": -df.loc[loss, "Profit"].sum(),
+    }
+
+def clasificar_descuento(df):
+    bins = [-float("inf"), 0, 0.05, 0.10, float("inf")]
+    labels = ["0%", "1%-5%", "6%-10%", "más de 10%"]
+
+    df = df.copy()
+
+    df["discount_band"] = pd.cut(df["Discount"], bins=bins, labels=labels)
+
+    return df
+
+def crear_csv(df, nombre_archivo):
+   df.to_csv(Path(__file__).resolve().parent.parent / "submission" / nombre_archivo, index=False)
 
 def pregunta_01() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """
+   """
     Una cadena de suministros de oficina vende mucho, pero la gerencia
     sospecha que parte de esas ventas no deja utilidad. El archivo
     `data/superstore_orders.csv.gz` tiene una fila por línea de pedido, con
@@ -48,6 +78,63 @@ def pregunta_01() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         discount_band,lines,sales,profit,profit_margin,loss_line_rate,...
         0%,166,170539.05,29472.3789,0.1728,0.488,...
         ...
-    """
+   """
+   ruta = Path(__file__).resolve().parent.parent / "data" / "superstore_orders.csv.gz"
+   df = pd.read_csv(ruta, sep=";", decimal=",")
 
-    raise NotImplementedError
+   resumen = calcular_resumen(df)
+   orders = df["Order ID"].nunique()
+
+   df = clasificar_descuento(df)
+
+#creacion profitability_summary
+   profitability_summary = pd.DataFrame([{
+      "lines": resumen["lines"],
+      "orders": orders,
+      "sales": resumen["sales"],
+      "profit": resumen["profit"],
+      "profit_margin": resumen["profit_margin"],
+      "loss_lines": resumen["loss_lines"],
+      "loss_line_rate": resumen["loss_line_rate"],
+      "lost_profit": resumen["lost_profit"]
+   }])
+
+# creacion discount_summary
+   grupos = df.groupby("discount_band", observed=False)
+
+   discount_summary = []
+
+   for banda, grupo in grupos:
+      resumen = calcular_resumen(grupo)
+
+      discount_summary.append({
+         "discount_band": banda,
+         **{k: resumen[k] for k in ["lines", "sales", "profit", "profit_margin", "loss_line_rate", "lost_profit"]}
+      })
+
+   discount_summary = pd.DataFrame(discount_summary)
+
+# creacion priority_segments
+   grupos = df.groupby(["Customer Segment", "Product Category"])
+
+   priority_segments = []
+
+   for (segmento, categoria), grupo in grupos:
+      resumen = calcular_resumen(grupo)
+
+      priority_segments.append({
+         "Customer Segment": segmento,
+         "Product Category": categoria,
+         **{k: resumen[k] for k in ["lines", "sales", "profit", "profit_margin", "lost_profit"]}
+      })
+
+   priority_segments = pd.DataFrame(priority_segments)
+   priority_segments = priority_segments[priority_segments["lines"] >= 100]
+   priority_segments = priority_segments.sort_values("lost_profit", ascending=False).head(5)
+
+# creacion de los archivos csv
+   crear_csv(profitability_summary, "profitability_summary.csv")
+   crear_csv(discount_summary, "discount_summary.csv")
+   crear_csv(priority_segments, "priority_segments.csv")
+
+   return profitability_summary, discount_summary, priority_segments
