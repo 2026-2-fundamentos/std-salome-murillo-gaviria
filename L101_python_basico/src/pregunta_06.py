@@ -1,3 +1,7 @@
+import gzip
+import csv
+from pathlib import Path
+
 def pregunta_06():
     """
     La quinta columna (`metrics`) contiene pares `clave:valor` separados por
@@ -12,5 +16,23 @@ def pregunta_06():
 
         [("aaa", 1, 9), ("bbb", 1, 9), ...]
     """
+    ruta = Path(__file__).resolve().parent.parent / "data" / "data.csv.gz"
+    conteo = {}
 
-    raise NotImplementedError
+    with gzip.open(ruta, "rt") as archivo:
+        lector = csv.reader(archivo, delimiter="\t")
+
+        for fila in lector:
+            pares = fila[4].split(",") 
+            for par in pares:
+                clave, valor = par.split(":")
+                valor = int(valor)
+                if clave in conteo:
+                    min_val, max_val = conteo[clave]
+                    conteo[clave] = (min(min_val, valor), max(max_val, valor))
+                else:
+                    conteo[clave] = (valor, valor)
+
+    resultado = sorted([(clave, min_val, max_val) for clave, (min_val, max_val) in conteo.items()])
+
+    return resultado

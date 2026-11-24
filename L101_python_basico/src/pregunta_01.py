@@ -1,3 +1,7 @@
+import gzip
+import csv
+from pathlib import Path
+
 def pregunta_01():
     """
     Calcule la suma de los valores de la segunda columna (`value`) del
@@ -7,5 +11,13 @@ def pregunta_01():
 
         214
     """
+    ruta = Path(__file__).resolve().parent.parent / "data" / "data.csv.gz"
+    suma = 0
 
-    raise NotImplementedError
+    with gzip.open(ruta, "rt") as archivo:
+        lector = csv.reader(archivo, delimiter="\t")
+
+        for fila in lector:
+            suma += int(fila[1])
+
+    return suma
