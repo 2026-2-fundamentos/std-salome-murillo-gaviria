@@ -1,5 +1,13 @@
 import pandas as pd
+from pathlib import Path
 
+def calcular_dias_habiles(fila):
+    if pd.isna(fila["out_date"]):
+        return None
+
+    dias_habiles = pd.bdate_range(start=fila["in_date"] + pd.Timedelta(days=1), end=fila["out_date"])
+
+    return len(dias_habiles)
 
 def pregunta_01() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
@@ -60,5 +68,66 @@ def pregunta_01() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         letter,28138,...
         ...
     """
+    ruta = Path(__file__).resolve().parent.parent / "data"
 
-    raise NotImplementedError
+    web = pd.read_csv(ruta / "historical_requests_web.csv.gz")
+    letter = pd.read_csv(ruta / "historical_requests_letter.csv.gz")
+
+    web = web.drop_duplicates()
+    letter = letter.drop_duplicates()
+
+    web["channel"] = "web"
+    letter["channel"] = "letter"
+
+# combinar los dos canales en un solo DataFrame
+    df = pd.concat([letter, web], ignore_index=True)
+
+    df["in_date"] = pd.to_datetime(df["in_date"])
+    df["out_date"] = pd.to_datetime(df["out_date"])
+
+    df["calendar_days"] = (df["out_date"] - df["in_date"]).dt.days
+    df["business_days"] = df.apply(calcular_dias_habiles, axis=1) 
+
+# identificar solicitudes respondidas a tiempo
+    df["on_time"] = df["business_days"].notna() & (df["business_days"] <= 15)
+
+# RESUMEN POR CANAL
+    channel_summary = (df.groupby("channel", as_index=False).agg(
+        requests=("channel", "size"),
+        answered=("out_date", "count"),
+        pending=("out_date", lambda x: x.isna().sum()),
+        median_business_days=("business_days", "median"),
+        on_time_rate=("on_time", "mean")
+    )).sort_values("channel")
+
+    df["year"] = df["in_date"].dt.year
+
+# RESUMEN ANUAL POR CANAL
+    yearly_summary = (df.groupby(["year", "channel"], as_index=False).agg(
+        requests=("channel", "size"),
+        pending=("out_date", lambda x: x.isna().sum()),
+        on_time_rate=("on_time", "mean")
+    )).sort_values(["year", "channel"])
+
+# ordenar los días de la semana
+    df["day_name"] = pd.Categorical(
+        df["day_name"],
+        categories=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+        ordered=True
+    )
+
+# RESUMEN POR DIA DE ENTRADA
+    entry_day_summary = df.groupby("day_name", as_index=False).agg(
+        requests=("day_name", "size"),
+        median_calendar_days=("calendar_days", "median"),
+        median_business_days=("business_days", "median")
+    )
+
+    salida = Path(__file__).resolve().parent.parent / "submission"
+    salida.mkdir(parents=True, exist_ok=True)
+
+    channel_summary.to_csv(salida / "channel_summary.csv", index=False)
+    yearly_summary.to_csv(salida / "yearly_summary.csv", index=False)
+    entry_day_summary.to_csv(salida / "entry_day_summary.csv", index=False)
+
+    return channel_summary, yearly_summary, entry_day_summary
