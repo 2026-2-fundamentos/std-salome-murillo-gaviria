@@ -1,3 +1,45 @@
+import pandas as pd
+from pathlib import Path
+import json
+
+def evaluar_esquema(df, columnas):
+    # Agrupar y contar las clases de equivalencia
+    grupos = df.groupby(columnas, observed=True).size()
+
+    equivalence_classes = len(grupos)
+    k_before_suppression = grupos.min()
+
+    # Identificar las clases que se deben suprimir
+    clases_suprimidas = grupos[grupos < 5]
+    suppressed_records = clases_suprimidas.sum()
+
+    # Obtener los registros publicados
+    clases_publicadas = grupos[grupos >= 5]
+
+    df_publicado = df.merge(clases_publicadas.reset_index()[columnas],on=columnas,how='inner')
+
+    published_records = len(df_publicado)
+    published_classes = len(clases_publicadas)
+
+    # Comprobar diversidad de fumadores
+    diversidad = df_publicado.groupby(columnas, observed=True)['smoker'].nunique()
+    clases_sin_diversidad = diversidad[diversidad == 1]
+    classes_without_smoker_diversity = len(clases_sin_diversidad)
+    records_without_smoker_diversity = grupos[grupos.index.isin(clases_sin_diversidad.index)].sum()
+
+    resultado = {
+        "quasi_identifiers": columnas,
+        "equivalence_classes": int(equivalence_classes),
+        "k_before_suppression": int(k_before_suppression),
+        "suppressed_records": int(suppressed_records),
+        "published_records": int(published_records),
+        "published_classes": int(published_classes),
+        "classes_without_smoker_diversity": int(classes_without_smoker_diversity),
+        "records_without_smoker_diversity": int(records_without_smoker_diversity)
+    }
+
+    return resultado, df_publicado
+
 def pregunta_01():
     """
     Una aseguradora quiere publicar datos de sus afiliados para que un grupo
@@ -79,5 +121,81 @@ def pregunta_01():
           ...
         }
     """
+    ruta = Path(__file__).resolve().parent.parent / "data" / "insurance.csv.gz"
+    df = pd.read_csv(ruta)
 
-    raise NotImplementedError
+    con_hijos = df.groupby(['age', 'sex', 'bmi', 'children', 'region']).size()
+    
+    original_k = con_hijos.min()
+    original_unique_records = con_hijos[con_hijos == 1].sum()
+
+# anonimizacion de la edad
+    df['age_group'] = pd.cut(
+        df['age'],
+        bins=[18, 30, 40, 50, 65],
+        labels=['18-29', '30-39', '40-49', '50-64'],
+        right=False
+    )
+
+# anonimizacion del indice de masa corporal
+    df['bmi_group'] = pd.cut(
+        df['bmi'],
+        bins=[-float('inf'), 18.5, 25, 30, float('inf')],
+        labels=['bajo peso', 'normal', 'sobrepeso', 'obesidad'],
+        right=False
+    )
+
+# anonimizacion del numero de hijos
+    df['children_group'] = pd.cut(
+        df['children'],
+        bins=[-1, 0, 2, float('inf')],
+        labels=['0', '1-2', '3+'],
+    )
+
+    columnas_con_hijos = ['age_group', 'sex', 'bmi_group', 'children_group', 'region']
+    columnas_sin_hijos = ['age_group', 'sex', 'bmi_group', 'region']
+
+    resultado_con_hijos, df_con_hijos = evaluar_esquema(df, columnas_con_hijos)
+    resultado_sin_hijos, df_sin_hijos = evaluar_esquema(df, columnas_sin_hijos)
+
+    schemes = {
+        "with_children": resultado_con_hijos,
+        "without_children": resultado_sin_hijos
+    }
+
+    if resultado_con_hijos["suppressed_records"] <= resultado_sin_hijos["suppressed_records"]:
+        selected_scheme = "with_children"
+        df_publicado = df_con_hijos
+        columnas_seleccionadas = columnas_con_hijos
+    else:
+        selected_scheme = "without_children"
+        df_publicado = df_sin_hijos
+        columnas_seleccionadas = columnas_sin_hijos
+
+    mean_charges_original = df["charges"].mean()
+    mean_charges_published = df_publicado["charges"].mean()
+
+    smoker_rate_original = (df["smoker"] == "yes").mean()
+    smoker_rate_published = (df_publicado["smoker"] == "yes").mean()
+
+    reporte = {
+        "original_k": int(original_k),
+        "original_unique_records": int(original_unique_records),
+        "schemes": schemes,
+        "selected_scheme": selected_scheme,
+        "mean_charges_original": float(mean_charges_original),
+        "mean_charges_published": float(mean_charges_published),
+        "smoker_rate_original": float(smoker_rate_original),
+        "smoker_rate_published": float(smoker_rate_published)
+    }
+
+    ruta_salida = Path(__file__).resolve().parent.parent / "submission"
+
+    with open(ruta_salida / "privacy_report.json", "w", encoding="utf-8") as archivo:
+        json.dump(reporte, archivo, indent=4, ensure_ascii=False)
+
+    columnas_csv = columnas_seleccionadas + ["smoker", "charges"]
+
+    df_publicado[columnas_csv].to_csv(ruta_salida / "insurance_published.csv",index=False)
+
+    return reporte
